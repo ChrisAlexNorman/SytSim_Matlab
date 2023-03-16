@@ -4,10 +4,10 @@ function Results = run_simulation(varargin)
 % Syntax: Results = run_simulation(varargin)
 %
 % Inputs:
-%    varargin::cell    Name-value pairs of parameter options
+%    varargin::cell    Name-value pairs of parameters (see README.md)
 %
 % Outputs:
-%    Results::struct    See README.md
+%    Results::struct    Aggregated results of simulations (see README.md)
 %
 % m-file Requirements:
 % simulate_vesicle.m
@@ -19,25 +19,7 @@ function Results = run_simulation(varargin)
 
 %------------- BEGIN CODE --------------
 
-%% Try to get or set up parallel pool
-fprintf('Getting parallel pool...\n')
-
-poolObj = gcp('nocreate');
-if isempty(poolObj) % No pool already set up
-    clear('poolObj');
-    try % to set up pool with all available local workers
-        myCluster = parcluster('local');
-        nWorkers  = myCluster.NumWorkers;
-        poolObj   = parpool('local',nWorkers);
-    catch
-        nWorkers  = 1;
-        warning('Failed to start parallel pool')
-    end
-else
-    nWorkers = poolObj.NumWorkers;
-end
-
-%% Declare default simulation parameters
+%% Parse inputs and declare default simulation parameters
 
 % Parse inputs
 if mod(nargin,2) ~= 0
@@ -62,6 +44,16 @@ if ~exist('CaTimeSeries','var')
     error('Ca2+ trace not provided in name-value format as: "CaTimeSeries", array')
 end
 
+% Toggle to distribute simulations to parallel workers
+for i = 1:size(inRequests,2)
+    if strcmp('tryParallel',inRequests{1,i})
+        tryParallel = inRequests{2,i};
+    end
+end
+if ~exist('tryParallel','var')
+    tryParallel = true;
+end
+
 fprintf('\nSimulation initialised with the following parameters:\n')
 
 % rng seed
@@ -70,7 +62,7 @@ for i = 1:size(inRequests,2)
         seed = inRequests{2,i};
     end
 end
-if ~exist('Seed','var')
+if ~exist('seed','var')
     seed = 'shuffle';
 end
 fprintf(['rng seed = ',num2str(seed),'\n'])
@@ -196,6 +188,43 @@ fprintf(['Syt1 kout = ',num2str(kouts(1)),' 1/ms\n'])
 kouts(2) = 0.015*(0.015-kin-2*koff)/(0.015-2*koff);
 fprintf(['Syt7 kout = ',num2str(kouts(2)),' 1/ms\n'])
 
+%% Try to get or set up parallel pool
+
+if tryParallel
+    fprintf('\nTrying to set up parallel pool...\n')
+    
+    lastwarn('');
+    ver('parallel');
+    if isempty(lastwarn)
+        % Parallel Computing Toolbox is installed
+        
+        poolObj = gcp('nocreate');
+        if isempty(poolObj) % No pool already set up
+            clear('poolObj');
+            try % to set up pool with all available local workers
+                myCluster = parcluster('local');
+                nWorkers  = myCluster.NumWorkers;
+                poolObj   = parpool('local',nWorkers);
+            catch
+                warning('Failed to start parallel pool. Running serially.\n')
+                nWorkers = 1;
+                tryParallel = false;
+            end
+        else
+            nWorkers = poolObj.NumWorkers;
+            fprintf(['Pool already exists. Connected to ',num2str(nWorkers),' workers.\n'])
+        end
+        
+    else
+        fprintf('Parallel Computing Toolbox not installed. Running serially.\n')
+        nWorkers = 1;
+        tryParallel = false;
+    end
+else
+    fprintf('\nNo parallelisation requested. Running simulations serially\n')
+    nWorkers = 1;
+end
+
 %% Evaluate Results
 
 % Number of releases to be collected by each worker
@@ -206,25 +235,31 @@ releaseTimes = cell(1,nWorkers);
 repleniTimes = cell(1,nWorkers);
 nVsim = zeros(1,nWorkers);
 PinRecRaw = cell(1,nWorkers);
-evaluationFutures(nWorkers) = parallel.FevalFuture();
 
-fprintf('\nSending jobs to workers...\n')
-
-% Send tasks to parallel workers
 tStart = tic;
-for v = 1:nWorkers
-    evaluationFutures(v) = parfeval(poolObj,@simulate_vesicle,4,CaTimeSeries,recordPins,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap,seed);
-    pause(0.1) % for rng based on system clock
-end
+if tryParallel
+    
+    evaluationFutures(nWorkers) = parallel.FevalFuture();
+    fprintf('\nSending jobs to workers...\n')
 
-fprintf('Done. Waiting for results...\n')
+    % Send tasks to parallel workers
+    for v = 1:nWorkers
+        evaluationFutures(v) = parfeval(poolObj,@simulate_vesicle,4,CaTimeSeries,recordPins,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap,seed);
+        pause(0.1) % for rng based on system clock
+    end
 
-% Collect results from workers as they arrive
-for vi = 1:nWorkers
-    [~,releaseTimes{vi},repleniTimes{vi},nVsim(vi),PinRecRaw{vi}] = fetchNext(evaluationFutures);
+    fprintf('Done. Waiting for results...\n')
+
+    % Collect results from workers as they arrive
+    for vi = 1:nWorkers
+        [~,releaseTimes{vi},repleniTimes{vi},nVsim(vi),PinRecRaw{vi}] = fetchNext(evaluationFutures);
+    end
+
+else
+    fprintf('\nStarting serial simulations...\n')
+    [releaseTimes{1},repleniTimes{1},nVsim,PinRecRaw{1}] = simulate_vesicle(CaTimeSeries,recordPins,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap,seed);
 end
 tElapsed = toc(tStart) / 60;
-
 fprintf(['Done! Elapsed time = ',num2str(tElapsed),' mins\n'])
 
 %% Construct output

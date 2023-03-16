@@ -1,7 +1,7 @@
 function [releaseTimes,repleniTimes,nVSim,PinRec] = simulate_vesicle(CaTimeSeries,recordPins,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap,seed)
 %% Repeatedly simulates specified model until target number of releases achieved
 %
-% Syntax:  [releaseTimes,repleniTimes,nVSim,PinRec] = simulate_vesicle(CaTimeSeries,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap)
+% Syntax:  [releaseTimes,repleniTimes,nVSim,PinRec] = simulate_vesicle(CaTimeSeries,recordPins,nSNAREs,P,kon,koff,kin,kouts,fmodel,R,rmodel,nRelPerWorker,timeCap,seed)
 %
 % Inputs:
 %    CaTimeSeries::dbl  (N x 2) array: col1(time/ms) ; col2([Ca2+]/uM)
