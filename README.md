@@ -4,7 +4,7 @@
 
 **Contact:** chris.alex.norman@outlook.com
 
-Toolbox for simulating neurotransmitter release from synaptic vesicles under 'release of inhibition' models in response to arbitrary calcium stimuli.
+Toolbox for simulating neurotransmitter release from synaptic vesicles under 'release of inhibition' models in response to arbitrary calcium stimuli. This README is for the matlab implementation, see the *example* notebook in *python* for a description of that implemention.
 
 The modelling framework and constraining of of model parameters are described in the manuscript text which has been submitted for publication alongside this toolbox.
 Code was verified in MATLAB version R2020b.
