@@ -100,9 +100,20 @@ class MarkovModel:
         sim_spec.setdefault("record", self.state_names)
         sim_spec.setdefault("track_clamps", False)
         sim_spec.setdefault("runtime", time.time())
-        sim_spec.setdefault("n_simulations", 1)
         sim_spec.setdefault("n_processes", 1)
-        
+
+        # Set number of simulations or required number of events
+        if "n_simulations" in sim_spec:
+            sim_spec["batch_size"], sim_spec["n_simulations"] = sim_spec["n_simulations"], 0
+            sim_spec["n_events_required"] = {key: 0 for key in sim_spec["record"]}
+        elif "n_events_required" in sim_spec:
+            sim_spec["n_simulations"] = 0
+            sim_spec.setdefault("batch_size", 10000)
+            for required_key in sim_spec["n_events_required"].keys():
+                if required_key not in sim_spec["record"]:
+                    sim_spec["record"].append(required_key)
+        elif sim_spec["mode"] == "stochastic":
+            raise ValueError("One of 'n_simulations' or 'n_events_required' must be specified for 'stochastic' simulation")
         return sim_spec
 
     def import_model(self, filename):
@@ -199,30 +210,32 @@ def run_stochastic_simulations(simulation):
         simulation["free_clamps"] = np.zeros(len(simulation["timestamp"]))
 
     with mp.Pool(simulation["n_processes"]) as pool:
-        # Send jobs to worker pool
-        async_results = []
-        for _ in range(simulation["n_simulations"]):
-            async_results.append(
-                pool.apply_async(
-                    stochastically_simulate,
-                    args=(simulation,)
+        # Batch simulations until required number of events achieved
+        while not event_requirements_met(simulation):
+            simulation["n_simulations"] += simulation["batch_size"]
+            async_results = []
+            for _ in range(simulation["batch_size"]):
+                async_results.append(
+                    pool.apply_async(
+                        stochastically_simulate,
+                        args=(simulation,)
+                    )
                 )
-            )
-        # Collect event times
-        for output in async_results:
-            event_times = output.get()
-            for key, values in event_times.items():
-                simulation["event_times"][key] = np.append(
-                    simulation["event_times"][key], (values)
-                )
-            # Convert clamping events into timeseries (clamp models only)
-            if simulation["track_clamps"]:
-                timestamp, n_free_clamps = calc_free_clamp_timeseries(event_times)
-                clamp_t_idx = 0
-                for out_idx, out_t in enumerate(simulation["timestamp"]):
-                    while clamp_t_idx < len(timestamp)-1 and out_t > timestamp[clamp_t_idx+1]:
-                        clamp_t_idx += 1
-                    simulation["free_clamps"][out_idx] += n_free_clamps[clamp_t_idx]
+            # Collect event times
+            for output in async_results:
+                event_times = output.get()
+                for key, values in event_times.items():
+                    simulation["event_times"][key] = np.append(
+                        simulation["event_times"][key], (values)
+                    )
+                # Convert clamping events into timeseries (clamp models only)
+                if simulation["track_clamps"]:
+                    timestamp, n_free_clamps = calc_free_clamp_timeseries(event_times)
+                    clamp_t_idx = 0
+                    for out_idx, out_t in enumerate(simulation["timestamp"]):
+                        while clamp_t_idx < len(timestamp)-1 and out_t > timestamp[clamp_t_idx+1]:
+                            clamp_t_idx += 1
+                        simulation["free_clamps"][out_idx] += n_free_clamps[clamp_t_idx]
         
     # Normalise free_clamps
     if simulation["track_clamps"]:
@@ -294,6 +307,12 @@ def stochastically_simulate(simulation):
         current_transitions = rate_update_rule(current_state, simulation, chosen_transition)
         
     return event_times
+
+def event_requirements_met(simulation):
+    for key, n_required in simulation["n_events_required"].items():
+        if len(simulation["event_times"][key]) <= n_required:
+            return False
+    return True
 
 def shift_rate_integrals(current_time, current_transitions):
     return [{
