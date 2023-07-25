@@ -145,6 +145,10 @@ class MarkovModel:
                 if self.state_names[idx] in simulation["record"]
             }
             simulation["probability"] = probability
+            # Convert probabilities to rates:
+            simulation["rate"] = {}
+            for state, probability in simulation["probability"].items():
+                simulation["rate"][state] = prob_to_rate(probability, simulation["timestamp"])
 
         # Stochastic (Gillespie) solution
         elif simulation["mode"].lower() == "stochastic":
@@ -376,6 +380,13 @@ def calc_event_rate(event_times, n_simulations, smoothing=False):
     prob_values = np.cumsum(hist_counts) / n_simulations
     release_rate = np.diff(prob_values) / np.diff(bin_centres)
     return {'timestamp': bin_centres, 'rate': release_rate}
+
+def prob_to_rate(probability, timestamp, smoothing=False):
+    diff_timestamp = np.diff(timestamp)
+    diff_prob = np.diff(probability)
+    mid_timepoints = timestamp[:-1] + diff_timestamp / 2
+    rate = diff_prob / diff_timestamp
+    return {'timestamp': mid_timepoints, 'rate': rate}
 
 def calc_free_clamp_timeseries(event_times):
     # Convert to timeseries
