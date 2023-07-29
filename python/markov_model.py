@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import numexpr as ne
 import copy
 import json
@@ -208,6 +209,7 @@ def run_stochastic_simulations(simulation):
     simulation["event_times"] = {key: np.array([]) for key in simulation["record"]}
     if simulation["track_clamps"]:
         simulation["free_clamps"] = np.zeros(len(simulation["timestamp"]))
+        free_clamps_fused = {"timestamp": [], "n_free_clamps": []}
 
     with mp.Pool(simulation["n_processes"]) as pool:
         # Batch simulations until required number of events achieved
@@ -236,10 +238,52 @@ def run_stochastic_simulations(simulation):
                         while clamp_t_idx < len(timestamp)-1 and out_t > timestamp[clamp_t_idx+1]:
                             clamp_t_idx += 1
                         simulation["free_clamps"][out_idx] += n_free_clamps[clamp_t_idx]
+                    # Calculate free clamps at instance of fusion
+                    free_clamps_fused["timestamp"].extend(event_times["Fused"])
+                    free_clamps_fused["n_free_clamps"].extend(np.interp(event_times["Fused"], timestamp, n_free_clamps))
         
-    # Normalise free_clamps
     if simulation["track_clamps"]:
+        # Calculate free clamps on unfused SVs
+        # TODO: This approach only valid for no vesicle replenishment
+        unfused_normalisation = [simulation["n_simulations"]] * len(simulation["timestamp"])
+        simulation["free_clamps_unfused"] = copy.deepcopy(simulation["free_clamps"])
+        # print(simulation["free_clamps"])
+        for fusion_time, n_free in zip(free_clamps_fused["timestamp"], free_clamps_fused["n_free_clamps"]):
+            # print(fusion_time, n_free)
+            for idx, t in enumerate(simulation["timestamp"]):
+                if t > fusion_time:
+                    unfused_normalisation[idx] -= 1
+                    simulation["free_clamps_unfused"][idx] -= n_free
+        simulation["free_clamps_unfused"] /= unfused_normalisation
+        
+        # Normalise all free clamps over time
         simulation["free_clamps"] /= simulation["n_simulations"]
+
+        # Process free clamps at instance of fusion
+        # Calculate the midpoints between each pair of consecutive timestamps
+        midpoints = (simulation["timestamp"][:-1] + simulation["timestamp"][1:]) / 2
+        # Create bins with lower edge at midpoint to previous timestamp and upper edge at midpoint to next timestamp
+        bins = np.concatenate([[simulation["timestamp"][0] - (midpoints[0] - simulation["timestamp"][0])], 
+                            midpoints, 
+                            [simulation["timestamp"][-1] + (simulation["timestamp"][-1] - midpoints[-1])]])
+        # Convert to dataframe
+        df = pd.DataFrame(free_clamps_fused)
+        df['bin'] = np.digitize(df['timestamp'], bins) - 1
+        # Calculate the mean and standard deviation for each bin
+        grouped = df.groupby('bin')['n_free_clamps']
+        mean_std = pd.DataFrame({
+            'mean': grouped.mean(),
+            'std': grouped.std()
+        })
+        # To match with simulation["timestamp"], reindex the DataFrame
+        mean_std = mean_std.reindex(np.arange(len(simulation["timestamp"])))
+        # If there are NaN values (which means no data points in those bins), fill them with zero
+        mean_std = mean_std.fillna(0)
+        # Create output
+        simulation["free_clamps_fused"] = {
+            'mean': mean_std['mean'].tolist(),
+            'std': mean_std['std'].tolist()
+        }
 
     # Convert event times to probabilities
     simulation["probability"], simulation["raw_probability"] = events_to_probs(simulation["event_times"], simulation["n_simulations"], simulation["timestamp"])
