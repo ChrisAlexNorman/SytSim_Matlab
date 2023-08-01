@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import numexpr as ne
+import random
 import copy
 import json
 import jsbeautifier
@@ -297,6 +298,7 @@ def run_stochastic_simulations(simulation):
 
 def stochastically_simulate(simulation):
     '''Runs direct Gillespie algorithm for specified simulation including spontaneous state and rate update rules.'''
+    random.seed(int(time.time() * 1e9) + mp.current_process().pid)
 
     # Unpack values from 'simulation'
     initial_condition = simulation["initial_condition"]
@@ -324,7 +326,7 @@ def stochastically_simulate(simulation):
         # Find time waited in current state
         if len(current_transitions) == 0: break
         shifted_rate_integrals = shift_rate_integrals(current_time, current_transitions)
-        rand_log = np.log(np.random.random())
+        rand_log = np.log(random.random())
         try:
             wait_time = root_scalar(wait_time_root_func, x0=0, bracket=[0, end_time-current_time], args=(shifted_rate_integrals, rand_log), method='brentq').root # or 'toms748' 
         except:
@@ -340,7 +342,7 @@ def stochastically_simulate(simulation):
         ]
         chosen_transition = current_transitions[
             np.searchsorted(
-                np.cumsum(current_rates) / np.sum(current_rates), np.random.random()
+                np.cumsum(current_rates) / np.sum(current_rates), random.random()
             )
         ]
 
