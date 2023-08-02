@@ -298,7 +298,7 @@ def run_stochastic_simulations(simulation):
 
 def stochastically_simulate(simulation):
     '''Runs direct Gillespie algorithm for specified simulation including spontaneous state and rate update rules.'''
-    random.seed(int(time.time() * 1e9) + mp.current_process().pid)
+    random.seed(int(time.time() * 1e9) * mp.current_process().pid)
 
     # Unpack values from 'simulation'
     initial_condition = simulation["initial_condition"]
