@@ -1,4 +1,4 @@
-# SytSim
+# SytSim_Matlab
 
 **Author:** Chris Norman
 
