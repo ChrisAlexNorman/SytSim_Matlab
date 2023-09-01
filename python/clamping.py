@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.integrate import cumtrapz
 from utilities import sparsify_rate_matrix, eval_params_in_array
 
 ### CLAMP MODEL BUILDER ###
@@ -214,6 +215,7 @@ def exponential_clamp_fusion_rate(current_state, simulation, chosen_transition=N
     for transition in current_transitions:
         if transition["source"] == "Unfused" and transition["destination"] == "Fused":
             transition["rate"] = np.repeat(fusion_rate, 2)
+            transition["rate_integral"] = cumtrapz(transition["rate"], transition["timestamp"], initial=0)
     return current_transitions
 
 def exponential_clamp_fusion_rate_with_resistance(current_state, simulation, chosen_transition=None, current_transitions=None):
